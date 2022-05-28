@@ -1,0 +1,20 @@
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+
+spring:
+  data:
+    mongodb:
+      uri: mongodb://localhost:27017/broker-db
+  hateoas:
+    use-hal-as-default-json-media-type: false
+
+---
+spring:
+  profiles:
+    active: cloud
+  data:
+    mongodb:
+      uri: ${vcap.services.broker-db.credentials.uri:mongodb://localhost:27017/broker-db}

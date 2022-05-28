@@ -1,0 +1,8 @@
+= Eureka interop
+
+To test the compatibility of Eureka with different Spring Cloud release trains
+
+[source,bash]
+---------
+./scripts/runAcceptanceTests.sh
+---------

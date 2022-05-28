@@ -1,0 +1,137 @@
+plugins {
+	id 'groovy'
+	id 'org.springframework.boot'
+	id 'io.spring.dependency-management'
+	id 'org.springframework.cloud.contract'
+	id 'maven-publish'
+	id 'com.google.protobuf'
+}
+
+group = 'com.example'
+version = '0.0.1-SNAPSHOT'
+sourceCompatibility = '17'
+
+repositories {
+	mavenCentral()
+	mavenLocal()
+	maven { url "https://repo.spring.io/snapshot" }
+	maven { url "https://repo.spring.io/milestone" }
+	maven { url "https://repo.spring.io/release" }
+}
+
+sourceSets {
+	main {
+		java {
+			srcDirs += 'src/main/proto_gen'
+		}
+		proto {
+			srcDirs += 'src/main/resources/proto'
+		}
+	}
+}
+
+ext {
+	set('springCloudVersion', "${BOM_VERSION}")
+}
+
+println "Boot Version [${bootVersion}], Cloud version [${BOM_VERSION}], Contract version [${verifierVersion}]"
+
+dependencies {
+	implementation 'net.devh:grpc-server-spring-boot-starter:2.10.1.RELEASE'
+	testImplementation 'com.squareup.okhttp3:logging-interceptor:4.8.1'
+	testImplementation 'com.asarkar.grpc:grpc-test:1.0.3'
+
+	// for compatibility
+	testImplementation('org.junit.jupiter:junit-jupiter-engine')
+	
+	
+	testImplementation("org.springframework.cloud:spring-cloud-starter-contract-verifier")
+	
+}
+
+dependencyManagement {
+	imports {
+		mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
+	}
+}
+
+protobuf {
+	protoc {
+		artifact = "com.google.protobuf:protoc:3.12.3"
+	}
+	plugins {
+		grpc {
+			artifact = "io.grpc:protoc-gen-grpc-java:1.31.1"
+		}
+	}
+	generateProtoTasks {
+		ofSourceSet('main').each { task ->
+			task.builtins {
+				java {
+					outputSubDir = 'proto_gen'
+				}
+			}
+			task.plugins {
+				grpc {
+					outputSubDir = 'proto_gen'
+				}
+			}
+		}
+	}
+	generatedFilesBaseDir = "$projectDir/src/"
+}
+
+task cleanProtoGen {
+	doFirst {
+		delete("$projectDir/src/main/proto_gen")
+	}
+}
+
+clean.dependsOn cleanProtoGen
+
+contracts {
+	testFramework = "JUNIT5"
+	packageWithBaseClasses = 'com.example'
+	testMode = "CUSTOM"
+}
+
+generateContractTests {
+	dependsOn("generateProto")
+}
+
+contractTest {
+	dependsOn("generateContractTests")
+	useJUnitPlatform()
+	testLogging {
+		exceptionFormat = 'full'
+	}
+	afterSuite { desc, result ->
+		if (!desc.parent) {
+			println "Results: (${result.testCount} tests, ${result.successfulTestCount} successes, ${result.failedTestCount} failures, ${result.skippedTestCount} skipped)"
+			boolean skipTests = Boolean.parseBoolean(project.findProperty('SKIP_TESTS') ?: "false")
+			if (result.testCount == 0 && !skipTests) {
+				throw new IllegalStateException("No tests were found. Failing the build")
+			}
+		}
+	}
+}
+
+publishing {
+	publications {
+		mavenJava(MavenPublication) {
+			artifact bootJar
+			
+			artifact verifierStubsJar
+
+			// https://github.com/spring-gradle-plugins/dependency-management-plugin/issues/273
+			versionMapping {
+				usage("java-api") {
+					fromResolutionOf("runtimeClasspath")
+				}
+				usage("java-runtime") {
+					fromResolutionResult()
+				}
+			}
+		}
+	}
+}

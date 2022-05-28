@@ -1,0 +1,5 @@
+:branch: main
+
+= Spring Cloud Stream Reactive integration
+
+Starting from Spring Cloud Sleuth 3.1.0 we support Spring Cloud Stream with Reactive functions.

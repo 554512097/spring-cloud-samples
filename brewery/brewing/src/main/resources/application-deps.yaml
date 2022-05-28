@@ -1,0 +1,6 @@
+spring.cloud.zookeeper:
+  dependencies:
+    presenting:
+      path: dependency/presenting
+    proxy:
+      path: technical/proxy

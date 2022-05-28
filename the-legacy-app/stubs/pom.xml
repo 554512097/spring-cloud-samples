@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+
+	<artifactId>the-legacy-app-stubs</artifactId>
+	<version>0.0.1.RELEASE</version>
+	<packaging>jar</packaging>
+
+	<name>the-legacy-app-stubs</name>
+	<description>Stubs that the legacy app needs</description>
+
+	<parent>
+		<groupId>com.example</groupId>
+		<artifactId>the-legacy-app-parent</artifactId>
+		<version>0.0.1.RELEASE</version>
+		<relativePath>..</relativePath>
+	</parent>
+
+	<properties>
+		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+		<java.version>1.8</java.version>
+		<!-- We don't want to run the generated tests -->
+		<!--<skipTests>true</skipTests>-->
+		<spring-cloud-contract.version>3.1.3-SNAPSHOT</spring-cloud-contract.version>
+	</properties>
+
+	<dependencies>
+		<dependency>
+			<groupId>com.example</groupId>
+			<artifactId>the-legacy-app-api</artifactId>
+			<version>${project.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-web</artifactId>
+		</dependency>
+		<!-- We're adding the sc-contract plugin so as to create a stubbed response -->
+		<dependency>
+			<groupId>org.springframework.cloud</groupId>
+			<artifactId>spring-cloud-starter-contract-verifier</artifactId>
+			<scope>test</scope>
+		</dependency>
+	</dependencies>
+
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>org.springframework.cloud</groupId>
+				<artifactId>spring-cloud-contract-maven-plugin</artifactId>
+				<version>${spring-cloud-contract.version}</version>
+				<extensions>true</extensions>
+				<configuration>
+					<testMode>EXPLICIT</testMode>
+					<baseClassForTests>com.example.contracts.BaseClass</baseClassForTests>
+				</configuration>
+			</plugin>
+
+
+
+			<!-- From external contracts -->
+			<!--<plugin>
+				<groupId>org.springframework.cloud</groupId>
+				<artifactId>spring-cloud-contract-maven-plugin</artifactId>
+				<version>2.0.2.RELEASE</version>
+				<extensions>true</extensions>
+				<configuration>
+					<testMode>EXPLICIT</testMode>
+					<baseClassForTests>com.example.contracts.BaseClass</baseClassForTests>
+					&lt;!&ndash; We want to use the JAR with contracts with the following coordinates &ndash;&gt;
+					<contractDependency>
+						<groupId>com.example</groupId>
+						<artifactId>2017-s1p-external-contracts</artifactId>
+					</contractDependency>
+					&lt;!&ndash; The JAR with contracts should be taken from Maven local &ndash;&gt;
+					<contractsMode>LOCAL</contractsMode>
+					<contractsPath>/com/example/customer-rental-history/fraud-detection/rest</contractsPath>
+				</configuration>
+			</plugin>-->
+		</plugins>
+	</build>
+</project>

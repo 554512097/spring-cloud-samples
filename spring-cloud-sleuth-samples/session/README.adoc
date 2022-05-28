@@ -1,0 +1,5 @@
+:branch: main
+
+= Spring Session
+
+We're instrumenting the `SessionRepository`, `ReactiveSessionRepository` and the `FindByIndexNameSessionRepository`. Check the `TraceSessionAutoConfiguration` for more details.

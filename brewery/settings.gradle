@@ -1,0 +1,9 @@
+rootProject.name = "brewery"
+include 'brewing',
+		'presenting',
+		'reporting',
+		'ingredients',
+		'common',
+		'acceptance-tests',
+		'config-server',
+		'gateway'

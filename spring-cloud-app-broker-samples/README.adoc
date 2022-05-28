@@ -1,0 +1,336 @@
+= Spring Cloud App Broker Samples
+
+
+== Parameters transformers
+
+One of the very first things every broker will need to do is handle user input parameters.
+For that, `spring-cloud-app-broker` comes with two `parameter-transformer` out of the box and a mechanism to implement your own:
+
+[source, yml, indent=0]
+----
+parameters-transformers:
+  - name: EnvironmentMapping
+    args:
+      include: lang
+  - name: PropertyMapping
+    args:
+      include: count,upgrade,memory
+  - name: RequestTimeoutParameterTransformer
+----
+
+The first transformer is `PropertyMapping` where we can specify some deployment properties. We included three properties:
+`count` to allow our backing app to be scaled
+`upgrade` to upgrade the backing app to a new version
+`memory` to modify the default memory used by the backing app
+
+A full list of supported properties can be found in:
+https://docs.spring.io/spring-cloud-app-broker/docs/current/reference/html5/#_properties_configuration
+
+The second transformer is `EnvironmentMapping`, where we can list which properties we want to be passed from parameters to environment variables in the backing app.
+
+It is typical that we want to have some business logic on the way we handle the parameters, for that, we can create our own `ParameterTransformer`.
+On this example, we created a custom `RequestTimeoutParameterTransformer` where we are going to map a parameter from `request-timeout-ms` to an environment variable `my-app.httpclient.connect-timeout`.
+
+To achieve that we have to create our class:
+
+[source, java, indent=0]
+----
+public class RequestTimeoutParameterTransformer extends ParametersTransformerFactory<BackingApplication, Object> {
+
+        @Override
+        public ParametersTransformer<BackingApplication> create(Object config) {
+                return this::transform;
+        }
+
+        private Mono<BackingApplication> transform(
+                BackingApplication backingApplication, Map<String, Object> parameters) {
+                if (parameters.containsKey("request-timeout-ms")) {
+                        backingApplication
+                                .addEnvironment("my-app.httpclient.connect-timeout", parameters.get("request-timeout-ms"));
+                        parameters.remove("request-timeout-ms");
+                }
+                return Mono.just(backingApplication);
+        }
+
+}
+----
+
+And then register it as a bean:
+[source, java, indent=0]
+----
+@Bean
+public ParametersTransformerFactory<BackingApplication, Object> requestTimeoutParameterTransformerFactory() {
+        return new RequestTimeoutParameterTransformer();
+}
+----
+
+== Creating workflows
+
+With the default configuration, `spring-cloud-app-broker` handles the implementation of the basic operations a broker can handle: create, update, delete, bind, and unbind.
+However, there are going to be times where we want to perform actions before or after some of those operations.
+To help with that, `spring-cloud-app-broker` provides `https://docs.spring.io/spring-cloud-app-broker/docs/current/reference/html5/#_creating_a_service_instance[Workflows]`.
+Every Workflow can have an `@Order` associated with it so that we can decide when to execute it.
+
+A good practice is to keep the order in the same class so that we can easily read the order of all our workflows.
+
+We created one for Service Instances:
+
+[source,java,indent=0]
+----
+public class ServiceInstanceServiceOrder {
+    private static final int CREATE_SI_WORKFLOW_ORDER = 0;
+
+	public static final int VALIDATE_CREATE_PARAMETERS = CREATE_SI_WORKFLOW_ORDER - 400;
+}
+----
+
+An example of Workflow that runs before creating a Service Instance is validating the parameters:
+
+[source,java,indent=0]
+----
+@Component
+@Order(VALIDATE_CREATE_PARAMETERS)
+public class ServiceInstanceParametersValidatorWorkflow implements CreateServiceInstanceWorkflow {
+
+	private static final String SERVICE_NAME = "example";
+
+	private static final List<String> SUPPORTED_PARAMETERS = Arrays.asList("count", "memory", "routes"); // TODO java 14
+
+	@Override
+	public Mono<Boolean> accept(CreateServiceInstanceRequest request) {
+		return Mono.just(SERVICE_NAME.equals(request.getServiceDefinition().getName()));
+	}
+
+	@Override
+	public Mono<CreateServiceInstanceResponseBuilder> buildResponse(
+		CreateServiceInstanceRequest request,
+		CreateServiceInstanceResponseBuilder responseBuilder) {
+
+		for (String parameter : request.getParameters().keySet()) {
+			if (!SUPPORTED_PARAMETERS.contains(parameter)) {
+				String errorMessage = String.format("Invalid parameter {%s}", parameter);
+				return Mono.error(new ServiceBrokerInvalidParametersException(errorMessage));
+			}
+		}
+
+		return Mono.just(responseBuilder);
+	}
+
+}
+----
+
+== Service Instance state repositories
+
+Service brokers are not stateless.
+While creating, updating, deleting or binding and unbinding new service instances, there is a time-gap while that operation is in progress.
+By default, `spring-cloud-app-broker` provides some `InMemory` implementations of the `ServiceInstanceStateRepository` and `ServiceInstanceBindingStateRepository`, which are a great starting point but it is not a great idea to use them in production.
+Since, if the broker restarts, that state will be lost, leading to orphan Service Instances.
+
+To avoid that problem, we have to implement a Repository to persist the state in a database and not in memory.
+
+To achieve that we have are going to use https://spring.io/projects/spring-data-r2dbc[spring-data-r2dbc].
+
+First, we need to create our Service Instance data class
+
+[source,java,indent=0]
+----
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+class ServiceInstance {
+	@Id
+	private Long id;
+	private String serviceInstanceId;
+	private String description;
+	private OperationState operationState;
+}
+----
+
+And a Repository using the new `ReactiveCrudRepository`:
+[source,java,indent=0]
+----
+interface ServiceInstanceRepository extends ReactiveCrudRepository<ServiceInstance, Long> {
+
+	@Query("select * from service_instance where service_instance_id = :service_instance_id")
+	Mono<ServiceInstance> findByServiceInstanceId(@Param("service_instance_id") String serviceInstanceId);
+
+	@Query("delete from service_instance where service_instance_id = :service_instance_id")
+	Mono<Void> deleteByServiceInstanceId(@Param("service_instance_id") String serviceInstanceId);
+
+}
+----
+
+Now that we have our reactive Repository in place, we can implement the `ServiceInstanceStateRepository` class methods:
+
+[source,java,indent=0]
+----
+class DefaultServiceInstanceStateRepository implements ServiceInstanceStateRepository {
+
+	private final ServiceInstanceRepository serviceInstanceRepository;
+
+	DefaultServiceInstanceStateRepository(ServiceInstanceRepository serviceInstanceRepository) {
+		this.serviceInstanceRepository = serviceInstanceRepository;
+	}
+
+	@Override
+	public Mono<ServiceInstanceState> saveState(String serviceInstanceId, OperationState state, String description) {
+		return serviceInstanceRepository.findByServiceInstanceId(serviceInstanceId)
+			.flatMap(serviceInstance -> {
+				if (serviceInstance == null) {
+					serviceInstance = new ServiceInstance();
+				}
+
+				serviceInstance.setServiceInstanceId(serviceInstanceId);
+				serviceInstance.setOperationState(state);
+				serviceInstance.setDescription(description);
+
+				return Mono.just(serviceInstance);
+			})
+			.flatMap(serviceInstanceRepository::save)
+			.map(DefaultServiceInstanceStateRepository::toServiceInstanceState);
+	}
+
+	@Override
+	public Mono<ServiceInstanceState> getState(String serviceInstanceId) {
+		return serviceInstanceRepository.findByServiceInstanceId(serviceInstanceId)
+			.flatMap(serviceInstance -> {
+				if (serviceInstance == null) {
+					return Mono.error(new IllegalArgumentException("Unknown service instance ID " + serviceInstanceId));
+				}
+				return Mono.just(serviceInstance);
+			})
+			.map(DefaultServiceInstanceStateRepository::toServiceInstanceState);
+	}
+
+	@Override
+	public Mono<ServiceInstanceState> removeState(String serviceInstanceId) {
+		return getState(serviceInstanceId)
+			.doOnNext(serviceInstanceState -> serviceInstanceRepository.deleteByServiceInstanceId(serviceInstanceId));
+	}
+
+	private static ServiceInstanceState toServiceInstanceState(ServiceInstance serviceInstance) {
+		return new ServiceInstanceState(serviceInstance.getOperationState(), serviceInstance.getDescription(), null);
+	}
+
+}
+----
+The same applies to Service Instance Binding states.
+
+For those to be considered by Spring, we have to add them to our Configuration class:
+
+[source,java,indent=0]
+----
+@Configuration
+@EnableR2dbcRepositories
+@EnableTransactionManagement
+public class DataConfiguration {
+
+	@Bean
+	DefaultServiceInstanceStateRepository serviceInstanceStateRepository(
+		ServiceInstanceRepository serviceInstanceRepository) {
+		return new DefaultServiceInstanceStateRepository(serviceInstanceRepository);
+	}
+
+	@Bean
+	DefaultServiceInstanceBindingStateRepository serviceInstanceBindingStateRepository(
+		ServiceInstanceBindingRepository serviceInstanceBindingRepository) {
+		return new DefaultServiceInstanceBindingStateRepository(serviceInstanceBindingRepository);
+	}
+
+}
+----
+
+Since our broker is fully reactive, we went for an implementation based on R2DBC.
+
+A not recommended alternative, not fully reactive, is wrapping a blocking database call into a `Mono.fromCallable(() -> ...)`.
+However, this can easily lead to a thread exhaustion and subsequent memory problems if there are enough calls being made to the database.
+
+An example of this approach is:
+
+[source,java,indent=0]
+----
+@Override
+public Mono<ServiceInstanceState> getState(String serviceInstanceId) {
+    return Mono.fromCallable(() -> crudRepository.findByServiceInstanceId(serviceInstanceId))
+               .flatMap(optionalServiceInstance -> Mono.defer(() -> Mono.just(optionalServiceInstance.get())))
+               .map(DefaultServiceInstanceStateRepository::toServiceInstanceState);
+}
+----
+
+== Backing application Targets
+
+Different brokers will have different strategies on where to deploy every backing application.
+
+By default, `spring-cloud-app-broker` provides the two most common implementations on how and where to deploy the backing applications
+* `SpacePerServiceInstance` will deploy backing applications to a unique target location that is named using the service instance GUID provided by the platform at service instance create time.
+For Cloud Foundry, this target location will be the org named by `spring.cloud.appbroker.deployer.cloudfoundry.default-org` and a new space created using the service instance GUID as the space name.
+* `ServiceInstanceGuidSuffix` will deploy backing applications using a unique name and hostname that incorporates the service instance GUID provided by the platform at service instance create time.
+For Cloud Foundry, the target location will be the org named by `spring.cloud.appbroker.deployer.cloudfoundry.default-org`, the space named by `spring.cloud.appbroker.deployer.cloudfoundry.default-space`, and an application name as `[APP-NAME]-[SI-GUID]`, where `[APP-NAME]` is the `name` listed for the application under `spring.cloud.appbroker.services.apps` and `[SI-GUID]` is the service instance GUID. The application will also use a hostname incorporating the service instance GUID as a suffix, as `[APP-NAME]-[SI-GUID]`.
+
+However, it is possible to create a custom Target with custom business logic by creating a class that extends `TargetFactory`.
+
+[source,java]
+----
+public class CustomSpaceTarget extends TargetFactory<CustomSpaceTarget.Config> {
+
+	private CustomSpaceService customSpaceService;
+
+	public CustomSpaceTarget(CustomSpaceService customSpaceService) {
+		super(Config.class);
+		this.customSpaceService = customSpaceService;
+	}
+
+	@Override
+	public Target create(Config config) {
+		return this::apply;
+	}
+
+	private ArtifactDetails apply(Map<String, String> properties, String name, String serviceInstanceId) {
+		String space = customSpaceService.retrieveSpaceName();
+		properties.put(DeploymentProperties.TARGET_PROPERTY_KEY, space);
+
+		return ArtifactDetails.builder()
+			.name(name)
+			.properties(properties)
+			.build();
+	}
+
+	public static class Config {
+	}
+
+}
+----
+
+For these to be considered by Spring, we have to add them to our Configuration class:
+
+[source,java]
+----
+@Configuration
+public class TargetServiceConfiguration {
+
+	@Bean
+	public CustomSpaceService customSpaceService() {
+		return new CustomSpaceService();
+	}
+
+	@Bean
+	public CustomSpaceTarget customSpaceTarget(CustomSpaceService customSpaceService) {
+		return new CustomSpaceTarget(customSpaceService);
+	}
+
+}
+----
+
+Once configured, we can specify in our service the new custom Target:
+
+[source, yml, indent=0]
+----
+spring:
+  cloud:
+    appbroker:
+      services:
+        - service-name: example
+          plan-name: standard
+          target:
+            name: CustomSpaceTarget
+----

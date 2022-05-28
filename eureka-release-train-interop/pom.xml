@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+
+            THIS POM IS ONLY FOR EASY IMPORT TO IDE
+
+    -->
+    <groupId>com.example</groupId>
+    <artifactId>brixton-vs-camden</artifactId>
+    <version>1.0.0.BUILD-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <modules>
+        <!--<module>eureka-brixton-client</module>-->
+        <!--<module>eureka-brixton-server</module>-->
+        <!--<module>eureka-brixton-tester</module>-->
+        <!--<module>eureka-camden-client</module>-->
+        <!--<module>eureka-camden-server</module>-->
+        <!--<module>eureka-camden-tester</module>-->
+        <!--<module>eureka-dalston-client</module>-->
+        <!--<module>eureka-dalston-server</module>-->
+        <!--<module>eureka-dalston-tester</module>-->
+        <!-- <module>eureka-edgware-client</module>
+        <module>eureka-edgware-server</module>
+        <module>eureka-edgware-tester</module>
+        <module>eureka-finchley-client</module>
+        <module>eureka-finchley-server</module>
+        <module>eureka-finchley-tester</module> -->
+        <!-- <module>eureka-greenwich-client</module>
+        <module>eureka-greenwich-server</module>
+        <module>eureka-greenwich-tester</module> -->
+        <module>eureka-hoxton-client</module>
+        <module>eureka-hoxton-server</module>
+        <module>eureka-hoxton-tester</module>
+        <module>eureka-ilford-client</module>
+        <module>eureka-ilford-server</module>
+        <module>eureka-ilford-tester</module>
+        <module>eureka-jubilee-client</module>
+        <module>eureka-jubilee-server</module>
+        <module>eureka-jubilee-tester</module>
+    </modules>
+
+    <properties>
+        <maven.install.skip>true</maven.install.skip>
+        <main.basedir>${basedir}</main.basedir>
+    </properties>
+
+</project>

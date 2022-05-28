@@ -1,0 +1,2 @@
+# For tests
+logging.level.org.springframework.cloud.sleuth: DEBUG

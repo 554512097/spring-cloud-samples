@@ -1,0 +1,365 @@
+= Spring Cloud Contract Car Rental
+
+== car-rental (consumer)
+
+Sends an HTTP request to fraud detection from a test
+Gets a Stream message from fraud detection
+
+== fraud-detection (producer)
+
+Producer of the HTTP api and messages
+
+== Presentation steps
+
+=== Before
+
+Start Rabbit & Eureka
+
+[souce,bash]
+----
+$ docker-compose up -d
+$ spring cloud eureka
+----
+
+=== Start.spring.io
+
+=== car-rental
+
+web, stubrunner, stream rabbit, wiremock, Eureka Discovery
+
+and `stream-test-support` for Contract & Stream
+
+```xml
+		<dependency>
+			<groupId>org.springframework.cloud</groupId>
+			<artifactId>spring-cloud-stream-test-support</artifactId>
+			<scope>test</scope>
+		</dependency>
+```
+
+=== fraud-detection
+
+web, stream rabbit, verifier, REST Docs, wiremock, Eureka Discovery
+
+and `stream-test-support` for Contract & Stream
+
+```xml
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-stream-test-support</artifactId>
+    <scope>test</scope>
+</dependency>
+```
+
+and `plugin` - REMEMBER ABOUT `EXTENSIONS`
+
+```xml
+<!-- ADD A PLUGIN -->
+<plugin>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-contract-maven-plugin</artifactId>
+    <version>${spring-cloud-contract.version}</version>
+    <!-- REMEMBER ABOUT THIS LINE -->
+    <extensions>true</extensions>
+    <configuration>
+        <baseClassForTests>com.example.frauddetection.BaseClass</baseClassForTests>
+    </configuration>
+</plugin>
+```
+
+
+=== Code
+
+==== HTTP
+
+*CONSUMER*
+
+- Generate consumer from start.spring.io
+- Add the missing dependencies
+- Start with a test on the consumer side
+- Write a not passing test to reach the `/fraud` endpoint of the producer
+- Add the WireMock stub to make the test pass (port `6543`)
+
+*PRODUCER*
+
+- Generate producer from start.spring.io
+- Add the missing dependencies
+- Write a contract for the `/frauds` endpoint (the typo is deliberate)
+- Configure the plugin with `baseClassForTests`
+- Run `./mvnw clean install` - show breaking tests
+- Write the controller
+- Write missing base class setup
+- Rerun the `./mvnw clean install` - things pass
+- Run the app at port `6544`
+
+*CONSUMER*
+
+- Write a new test that will reach the producer application directly (port `6544`)
+- The previous test with a stub passes, the new one fails (oops)
+- Write a new test with `StubRunnerRule` `com.example:fraud-detection` at (port `6545`)
+- The test fails cause first we'll shoot at `/fraud`
+- The test passes once we shoot at `/frauds`
+
+==== Messaging
+
+*CONSUMER*
+
+- Enable binding for Sink
+- In `application.properties`
+    * set the port to `9876`
+    * `spring.cloud.stream.bindings.input.destination=fraud`
+    * on the producer side it will be `frauds`
+- Add a `Fraud` pojo with a `name`
+- Add a `FraudListener` `@Component`
+    * with a method `fraud` that has `@StreamListener(Sink.class)`
+    * let it print a message out
+    * and store the name
+- Let's write a `FraudTests` class
+    * we want to see if our listener will work fine if we send it our
+    POJO
+    * let's write a test `should_store_info_about_fraud`
+    * make it a SpringBoot test
+    * `@Autowired FraudListener`
+    * `@Autowired Sink`
+    * given: a `new Fraud("marcin")`
+    * when: `sink.input().send(MessageBuilder.withPayload(fraud).build());`
+    * then: `fraudListener.name == "marcin"`
+- The test passes - let's go to the producer
+
+*PRODUCER*
+
+- `EnableBinding(Source.class)`
+- Set properties
+    * `spring.cloud.stream.bindings.output.destination=frauds`
+    * Yup, that's a typo over there ^^
+    * `spring.cloud.stream.bindings.output.contentType=application/json`
+    * `server.port=6544`
+- Let's write a contract for messaging
+    * label `trigger_a_fraud`
+    * input method `triggerMethod()`
+    * output to destination `frauds`
+    * body `surname: "Long"`
+- Create a `Fraud` pojo in the `FraudController`
+- `FraudController` will need a `@PostMapping("/message")` method called `message` that will use `Source`
+to send a message with `new Fraud("Long")`
+- Let's run `./mvnw clean install` and generate tests
+    * they will fail cause we have a missing `triggerMethod()`
+- Let's create the `triggerMethod()` in the `BaseClass`
+    * Also we need to add the Spring context with `@AutoConfigureMessageVerifier`
+    * `@Autowired FraudController`
+    * call in the `triggerMethod()` the `fraudController.message()`
+
+Let's try to make both apps work! Let's run them together
+
+[source,bash]
+----
+curl -X POST http://localhost:6544/message
+----
+
+Nothing happens... Even though the tests passed. That's for 2 reasons
+
+- the destination is wrong. One is sending to `frauds` the other
+listening to `fraud`
+- the POJO is wrong. Once expects `name` the other `surname`
+
+Time to fix the consumer
+
+*CONSUMER*
+
+- Let's use Stub Runner
+- `@AutoConfigureStubRunner(workOffline = true, ids = "com.example:fraud-detection")`
+- `@Autowired StubTrigger`
+- `stubTrigger.trigger("trigger_a_fraud");`
+    * the test won't pass - let's update the destination
+- `spring.cloud.stream.bindings.input.destination=frauds`
+    * let's run again the tests - still they don't pass cause
+    the name is wrong
+- let's change `Fraud` to use `surname`
+    * now if we rerun the tests they pass
+
+Let's run both apps again, send the CURL - now they should work
+
+==== REST Docs
+
+*PRODUCER*
+
+- We need to write a test for the `message` endpoint
+- We'll write a test called `FraudControllerTests`
+- Use the test slices `AutoConfigureMockMvc` and `@AutoConfigureRestDocs(outputDir = "target/snippets")`
++
+[source,java]
+----
+@RunWith(SpringRunner.class)
+@SpringBootTest(classes = FraudDetectionApplication.class)
+@AutoConfigureRestDocs(outputDir = "target/snippets")
+@AutoConfigureMockMvc
+----
+- Write a simple test to see if status OK happens when you send
+a POST to `/message/`
++
+[souce,java]
+----
+@Autowired private MockMvc mockMvc;
+
+	@Test
+	public void should_accept_a_post_message() throws Exception {
+		mockMvc.perform(MockMvcRequestBuilders.post("/message"))
+				.andExpect(MockMvcResultMatchers.status().isOk())
+				.andDo(MockMvcRestDocumentation.document("message"));
+	}
+----
+- Time to configure the build to package stuff properly
+- We want to disable the default Spring Cloud Contract packaging
+approach
+    * You can do it by setting `<spring.cloud.contract.verifier.jar.skip>true</spring.cloud.contract.verifier.jar.skip>`
+    property
+- Add the `src/assembly/stub.xml`
++
+[source,xml]
+----
+<assembly
+        xmlns="http://maven.apache.org/plugins/maven-assembly-plugin/assembly/1.1.3"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://maven.apache.org/plugins/maven-assembly-plugin/assembly/1.1.3 https://maven.apache.org/xsd/assembly-1.1.3.xsd">
+    <id>stubs</id>
+    <formats>
+        <format>jar</format>
+    </formats>
+    <includeBaseDirectory>false</includeBaseDirectory>
+    <fileSets>
+        <fileSet>
+            <directory>${project.build.directory}/snippets/stubs</directory>
+            <outputDirectory>META-INF/${project.groupId}/${project.artifactId}/${project.version}/mappings</outputDirectory>
+            <includes>
+                <include>**/*</include>
+            </includes>
+        </fileSet>
+        <fileSet>
+            <directory>${project.build.directory}/stubs/META-INF/${project.groupId}/${project.artifactId}/${project.version}/mappings</directory>
+            <outputDirectory>META-INF/${project.groupId}/${project.artifactId}/${project.version}/mappings</outputDirectory>
+            <includes>
+                <include>**/*</include>
+            </includes>
+        </fileSet>
+        <fileSet>
+            <directory>${basedir}/src/test/resources/contracts</directory>
+            <outputDirectory>META-INF/${project.groupId}/${project.artifactId}/${project.version}/contracts</outputDirectory>
+            <includes>
+                <include>**/*.groovy</include>
+            </includes>
+        </fileSet>
+    </fileSets>
+</assembly>
+----
+- Add the assembly plugin setup
++
+[source,xml]
+----
+<plugin>
+    <groupId>org.apache.maven.plugins</groupId>
+    <artifactId>maven-assembly-plugin</artifactId>
+    <executions>
+        <execution>
+            <id>stub</id>
+            <phase>prepare-package</phase>
+            <goals>
+                <goal>single</goal>
+            </goals>
+            <inherited>false</inherited>
+            <configuration>
+                <attach>true</attach>
+                <descriptor>${basedir}/src/assembly/stub.xml</descriptor>
+            </configuration>
+        </execution>
+    </executions>
+</plugin>
+----
+- Run `./mvnw clean install`
+
+
+*CONSUMER*
+
+- Reuse the previously created setup and just send a `post`
+ method to `/messages`. Expect status `200`
+
+==== Discovery
+
+*CONSUMER*
+
+- Add `@EnableDiscoveryClient`
+- Add `@Bean @LoadBalanced` for `RestTemplate`
+- Add `spring.application.name=car-rental`
+- In `FraudTests` we'll add another test (we need `@AutoConfigureStubRunner`)
+    * `@Autowired RestTemplate`
+    * Use the `RestTemplate` to call `"http://fraud-detection/frauds"`
+    * The test passes cause SC-Contract redirects the calls via artifact id
+
+==== Stub Runner Boot with Eureka and Rabbit (optional)
+
+- Clone Stub Runner for Eureka & Rabbit from https://github.com/spring-cloud-samples/github-analytics-stub-runner-boot
+- Build it locally
+- `java -jar target/github-analytics-stub-runner-boot-0.0.1.M1.jar --stubrunner.workoffline=true --stubrunner.ids=com.example:fraud-detection`
+- Show http://localhost:8083/stubs
+- Show http://localhost:8083/triggers
+- Show http://localhost:8761 with registered apps
+- Run `car-rental`
+- `curl -X POST http://localhost:8083/triggers/trigger_a_fraud`
+- Check that in the logs we see that a message was received
+- Write a test that isn't annotated with `@AutoConfigureStubRunner`
+and inject `RestTemplate` - you can shoot a request to
+`fraud-detection` and a stub will respond
+    * or write a POST endpoint to `/rent` that will receive a
+    `{"name":"marcin"}` and then it will call `fraud-detection/frauds`
+    to retrieve a list of frauds. If that string contains the `name`
+    then set status code `406` and text `NO`. Otherwise `200` and `yes`
+    and run a curl `curl -X POST -d '{"name":"marcin"}' http://localhost:8765`
+
+
+==== Stub Runner Boot with a NodeJs app
+
+- Install `npm`
+- Install the `request` module `npm install request`
+- Ensure that Stub Runner Boot is not running
+- Go to `nodejs` folder and execute
++
+```
+$ node app.js
+```
+- You will get sth like this
++
+```
+ERROR - status [404]
+```
+- Next run stub runner boot and show how easy it is to start a stub (this assumes that `fraud-detection` stubs were installed locally)
++
+```
+$ mkdir -p target
+$ wget -O target/stub-runner.jar 'https://search.maven.org/remote_content?g=org.springframework.cloud&a=spring-cloud-contract-stub-runner-boot&v=1.2.3.RELEASE'
+$ java -jar target/stub-runner.jar --stubrunner.workOffline=true --stubrunner.ids="com.example:fraud-detection:+:9876"
+```
+
+or use docker (we're mounting your local `.m2` to the docker's `.m2`)
+
+```bash
+#!/bin/bash
+# Provide the Spring Cloud Contract Docker version
+SC_CONTRACT_DOCKER_VERSION="1.2.4.BUILD-SNAPSHOT"
+# Spring Cloud Contract Stub Runner properties
+STUBRUNNER_PORT="8083"
+# Stub coordinates 'groupId:artifactId:version:classifier:port'
+STUBRUNNER_IDS="com.example:fraud-detection:0.0.1-SNAPSHOT:stubs:9876"
+# Run the docker with Stub Runner Boot
+docker run  --rm -e "STUBRUNNER_IDS=${STUBRUNNER_IDS}" -e "STUBRUNNER_WORK_OFFLINE=true" -p "${STUBRUNNER_PORT}:${STUBRUNNER_PORT}" -p "9876:9876"  -v "${HOME}/.m2/:/root/.m2:ro" springcloud/spring-cloud-contract-stub-runner:"${SC_CONTRACT_DOCKER_VERSION}"
+```
+
+or use Spring Cloud CLI
+
+```
+$ spring cloud stubrunner
+```
+
+- You will get sth like this
++
+```javascript
+["marcin","josh"]
+```

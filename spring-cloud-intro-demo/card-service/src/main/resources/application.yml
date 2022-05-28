@@ -1,0 +1,21 @@
+spring:
+  application:
+    profiles:
+      active: production
+    name: card-service
+  config:
+    import: optional:configserver:http://localhost:9888
+logging:
+  level:
+    org.springframework: info
+server:
+  port: 9080
+management:
+  endpoints:
+    web:
+      exposure:
+        include:
+          - refresh
+          - env
+          - metrics
+          - prometheus

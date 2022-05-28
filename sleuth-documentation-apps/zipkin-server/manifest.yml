@@ -1,0 +1,13 @@
+applications:
+- name: docssleuth-zipkin-server
+  memory: 1024M
+  instances: 1
+  host: docssleuth-zipkin-server
+  path: build/zipkin.jar
+  services:
+    - docssleuth-rabbitmq
+    - docssleuth-mysql
+  env:
+    SPRING_PROFILES_ACTIVE: cloud
+    DEBUG: "true"
+    RABBIT_URI: ${vcap.services.docssleuth-rabbitmq.credentials.uri}

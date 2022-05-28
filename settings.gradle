@@ -1,0 +1,33 @@
+import java.util.regex.Matcher
+import java.util.regex.Pattern
+
+def projectRoot = rootProject.projectDir
+def includeDirs = [
+//        'gs-centralized-configuration',
+//        'gs-accessing-data-mongodb',
+//        'gs-serving-web-content',
+//        'gs-async-method',
+//        'gs-handling-form-submission',
+//        'gs-spring-boot',
+//        'gs-messaging-stomp-websocket',
+//        'gs-uploading-files',
+//        'gs-spring-cloud-loadbalancer',
+]
+includeDirs.each {
+    def subDir = new File(it)
+    def settingsFile = new File(subDir, "complete/settings.gradle")
+    if (settingsFile.exists()) {
+        settingsFile.eachLine {
+            def regx = Pattern.compile('.*include [\'|"]:?(.*)[\'|"]')
+            def matcher = regx.matcher(it)
+            if (matcher.matches()) {
+                def name = matcher.group(1)
+                include(":$name")
+                project(":$name").projectDir = new File(subDir, "complete/$name")
+            }
+        }
+    } else {
+        include(":$it")
+        project(":$it").projectDir = new File(subDir, "complete")
+    }
+}

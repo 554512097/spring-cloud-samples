@@ -1,0 +1,7 @@
+:branch: main
+
+= Spring Cloud Stream Reactive integration
+
+Starting from Spring Cloud Sleuth 3.1.0 we support Spring Cloud Stream with Reactive functions.
+
+When defining the consumer bean of `Consumer<Flux>` type, remember to call `subscribe()` at the end of your flux. Otherwise you'll get the `Dispatcher has no subscribers` error.

@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: stream-reactive-consumer
+
+spring.cloud.stream:
+  bindings.channel-in-0.destination: channelreactivedestination
+
+# For tests
+logging.level.org.springframework.cloud.sleuth: DEBUG
